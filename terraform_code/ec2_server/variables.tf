@@ -26,6 +26,6 @@ variable "region_name" {
 }
 
 variable "server_name" {
-  description = "EC2 Server Name"
+  description = "Name of Server"
   type        = string
 }

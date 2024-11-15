@@ -135,7 +135,13 @@ resource "aws_security_group" "my-sg" {
 
 # STEP2: CREATE EC2 USING PEM & SG
 resource "aws_instance" "my-ec2" {
-  ami           = var.ami   
+  ami           = var.ami
+  instance_market_options {
+    market_type = "spot"
+    spot_options {
+      max_price = 0.035
+    }
+  } 
   instance_type = var.instance_type
   key_name      = var.key_name        
   vpc_security_group_ids = [aws_security_group.my-sg.id]
@@ -153,7 +159,7 @@ resource "aws_instance" "my-ec2" {
     # ESTABLISHING SSH CONNECTION WITH EC2
     connection {
       type        = "ssh"
-      private_key = file("./key.pem") # replace with your key-name 
+      private_key = file("./To_A.pem") # replace with your key-name 
       user        = "ubuntu"
       host        = self.public_ip
     }
