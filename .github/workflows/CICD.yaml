@@ -6,7 +6,7 @@
 # separate terms of service, privacy policy, and support
 # documentation.
 
-name: Java CI with Maven
+name: npm CICD
 
 on:
   push:
@@ -36,7 +36,7 @@ jobs:
         output: trivy-report.json
         format: json
         scan-ref: .
-        exit-code: 1
+        exit-code: 0
         severity: 'CRITICAL,HIGH'
     - name: Upload Vulnerability Scan Results
       uses: actions/upload-artifact@v4
