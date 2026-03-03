@@ -96,10 +96,6 @@ jobs:
 
   buils_docker_image_and_push:
     runs-on: ubuntu-latest
-    env:
-      NAMESPACE: ${{ vars.namespace }}
-      IMAGE: ${{ vars.image }}
-      TAG: ${{ github.sha }}
     needs: build_project_and_sonar_scan
     steps:
     - uses: actions/checkout@v4
@@ -123,7 +119,7 @@ jobs:
       with:
         context: .
         push: true
-        tags: $NAMESPACE/$IMAGE:$TAG
+        tags: ${{ vars.namespace }}/${{ vars.image }}:${{ github.sha }}
         file: ./Dockerfile
 
   # deploy_to_kubernetes:
