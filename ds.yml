@@ -5,6 +5,7 @@ kind: Deployment
 metadata:
   name: mysql
 spec:
+  replicas: 1
   selector:
     matchLabels:
       app: mysql
@@ -26,6 +27,13 @@ spec:
         ports:
         - containerPort: 3306
           name: mysql
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "1Gi"
+            cpu: "500m"
 ---
 # MySQL Service
 apiVersion: v1
@@ -55,7 +63,7 @@ spec:
     spec:
       containers:
       - name: bankapp
-        image: adijaiswal/bankapp:latest
+        image: bankapp
         ports:
         - containerPort: 8080
         env:
@@ -72,7 +80,7 @@ kind: Service
 metadata:
   name: bankapp-service
 spec:
-  type: LoadBalancer
+  type: ClusterIP
   ports:
   - port: 80
     targetPort: 8080
