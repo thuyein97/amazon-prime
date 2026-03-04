@@ -161,6 +161,8 @@ jobs:
       ACK_DEPLOYMENT_NAME: ${{ vars.deploymentname }}
 
     steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
     - name: Set K8s context
       uses: aliyun/ack-set-context@v1
       with:
