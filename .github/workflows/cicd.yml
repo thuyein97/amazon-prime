@@ -164,7 +164,7 @@ jobs:
     - name: Checkout Code
       uses: actions/checkout@v4
     - name: Load environment variables
-      uses: dmno-dev/varlock-github-action@v1
+      uses: dmno-dev/varlock@v1
       with:
         fail-on-error: 'true'
         show-summary: 'true'
