@@ -163,11 +163,6 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
-    - name: Load environment variables
-      uses: dmno-dev/varlock-action@v0.0.1
-      with:
-        fail-on-error: 'true'
-        show-summary: 'true'
     - name: Set K8s context
       uses: aliyun/ack-set-context@v1
       with:
