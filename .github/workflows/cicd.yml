@@ -40,13 +40,13 @@ jobs:
         exit-code: 0
         format: sarif
         scan-ref: '.'
-        output: 'trivy-results.sarif'
+        output: 'trivy-fs-results.sarif'
 
     - name: Upload results to GitHub Security
       uses: github/codeql-action/upload-sarif@v4
       if: always() # Ensures results upload even if vulnerabilities are found
       with:
-        sarif_file: 'trivy-results.sarif'
+        sarif_file: 'trivy-fs-results.sarif'
 
     - name: Run Gitleaks
       uses: gitleaks/gitleaks-action@v2
@@ -135,13 +135,44 @@ jobs:
       uses: docker/setup-qemu-action@v3
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
-    - name: Build and Push Docker image
+    - name: Build Docker image (Local Only)
       uses: docker/build-push-action@v6
       with:
         context: .
-        push: true
-        tags: ${{ vars.namespace }}/${{ vars.image }}:${{ github.sha }}
+        push: false # Do not push yet!
+        load: true   # This loads the image into the local Docker daemon for Trivy to see
+        tags: local-image:test
         file: ./Dockerfile
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Scan Local Docker Image
+      uses: aquasecurity/trivy-action@0.20.0
+      with:
+        image-ref: local-image:test
+        severity: CRITICAL,HIGH
+        format: 'sarif'
+        output: 'trivy-image-results.sarif'
+        exit-code: 1 # This will stop the pipeline if vulnerabilities are found
+
+    - name: Upload Scan Results
+      uses: github/codeql-action/upload-sarif@v4
+      if: always() && hashFiles('trivy-image-results.sarif') != ''
+      with:
+        sarif_file: 'trivy-image-results.sarif'
+
+    - name: Push Docker image (Only if scan passed)
+      uses: docker/build-push-action@v6
+      # This step only runs if the previous steps (including the scan) succeeded
+      with:
+        context: .
+        push: true
+        tags: |
+          ${{ vars.namespace }}/${{ vars.image }}:${{ github.sha }}
+          ${{ vars.namespace }}/${{ vars.image }}:latest
+        file: ./Dockerfile
+
+    
 
   # deploy_to_kubernetes:
   #   runs-on: ubuntu-latest
@@ -200,5 +231,6 @@ jobs:
         kustomize build . | kubectl apply -f -
         kubectl rollout status deployment/$ACK_DEPLOYMENT_NAME
         kubectl get services -o wide
+        kubectl get pods
 
   
