@@ -4,7 +4,13 @@ on:
   push:
     branches: [ "main" ]
   workflow_dispatch:
-
+permissions:
+  contents: read
+  packages: write
+  security-events: write
+concurrency:
+  group: production-deploy
+  cancel-in-progress: true
 jobs:
   compile:
     runs-on: ubuntu-latest
@@ -26,16 +32,21 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    - name: Trivy Installation
-      run: |
-        sudo apt-get install -y wget apt-transport-https gnupg lsb-release
-        wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | sudo apt-key add -
-        echo deb https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main | sudo tee -a /etc/apt/sources.list.d/trivy.list
-        sudo apt-get update -y
-        sudo apt-get install -y trivy
-
-    - name: Trivy FS Scan
-      run: trivy fs --format table -o fs-report.json .
+    - name: Run Trivy scanner
+      uses: aquasecurity/trivy-action@0.20.0
+      with:
+        scan-type: fs
+        severity: CRITICAL,HIGH
+        exit-code: 1
+        format: sarif
+        scan-ref: '.'
+        output: 'trivy-results.sarif'
+        
+    - name: Upload results to GitHub Security
+      uses: github/codeql-action/upload-sarif@v3
+      if: always() # Ensures results upload even if vulnerabilities are found
+      with:
+        sarif_file: 'trivy-results.sarif'
 
     - name: Gitleaks Installation
       run: sudo apt install gitleaks -y
@@ -75,10 +86,10 @@ jobs:
         name: app-jar
         path: target/*.jar 
         
-    - uses: actions/checkout@v4
-      with:
-        # Disabling shallow clones is recommended for improving the relevancy of reporting
-        fetch-depth: 0
+    # - uses: actions/checkout@v4
+    #   with:
+    #     # Disabling shallow clones is recommended for improving the relevancy of reporting
+    #     fetch-depth: 0
     # - name: SonarQube Scan
     #   uses: SonarSource/sonarqube-scan-action@v5.0.0 # Ex: v4.1.0, See the latest version at https://github.com/marketplace/actions/official-sonarqube-scan
     #   env:
@@ -119,7 +130,7 @@ jobs:
       with:
         context: .
         push: true
-        tags: thuyein97/${{ vars.image }}:${{ github.sha }}
+        tags: ${{ vars.namespace }}/${{ vars.image }}:${{ github.sha }}
         file: ./Dockerfile
 
   # deploy_to_kubernetes:
