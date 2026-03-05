@@ -59,7 +59,7 @@ jobs:
 
     - name: Upload Gitleaks results
       uses: github/codeql-action/upload-sarif@v4 # Use v4 to avoid the deprecation warning
-      if: always() 
+      if: always() && hashFiles('gitleaks.sarif') != ''
       with:
         sarif_file: gitleaks.sarif
 
