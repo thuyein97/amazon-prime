@@ -215,7 +215,7 @@ jobs:
       NAMESPACE: ${{ vars.namespace }}
       IMAGE: ${{ vars.image }}
       TAG: ${{ github.sha }}
-      ACK_DEPLOYMENT_NAME: ${{ vars.deploymentname }}
+      ACK_DEPLOYMENT_NAME: ${{ vars.staging_deploymentname }}
       OVERLAY_DIR: k8s/overlays/staging
 
     steps:
@@ -249,6 +249,13 @@ jobs:
       run: |
         set -e
         kubectl rollout status deployment/$ACK_DEPLOYMENT_NAME
+    
+    - name: Post-deploy smoke test
+      run: |
+        set -e
+        # Basic health check; update URL to your actual ingress/health endpoint if different
+        curl -f https://test2.alphareds.com/login || curl -f https://test2.alphareds.com/health
+  
 
   deploy_to_kubernetes_prod:
     runs-on: ubuntu-latest

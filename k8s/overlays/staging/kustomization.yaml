@@ -6,3 +6,11 @@ images:
     newName: thuyein97/bankapp
     newTag: latest
 
+patches:
+  - target:
+      kind: Ingress
+      name: bankapp-ingress
+    patch: |-
+      - op: replace
+        path: /spec/rules/0/host
+        value: test2.alphareds.com
