@@ -1,2 +1,2 @@
 resources:
-  - ds.yml
+  - k8s/overlays/prod

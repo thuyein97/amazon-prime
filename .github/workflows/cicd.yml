@@ -205,9 +205,54 @@ jobs:
   #   - name: Deploy to EKS
   #     run: |
   #       kubectl apply -f ds.yml
-  deploy_to_kubernetes:
+  deploy_to_kubernetes_staging:
     runs-on: ubuntu-latest
     needs: buils_docker_image_and_push
+    environment:
+      name: staging
+    env:
+      REGISTRY: ${{ vars.registry }}
+      NAMESPACE: ${{ vars.namespace }}
+      IMAGE: ${{ vars.image }}
+      TAG: ${{ github.sha }}
+      ACK_DEPLOYMENT_NAME: ${{ vars.deploymentname }}
+      OVERLAY_DIR: k8s/overlays/staging
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+    - name: Set K8s context (staging)
+      uses: aliyun/ack-set-context@v1
+      with:
+        access-key-id: "${{ secrets.ACCESS_KEY_ID }}"
+        access-key-secret: "${{ secrets.ACCESS_KEY_SECRET }}"
+        cluster-id: "${{ vars.ACK_CLUSTER_ID }}"
+
+    - name: Setup Kustomize
+      uses: imranismail/setup-kustomize@v2
+    - name: Render manifests with updated image (staging)
+      working-directory: ${{ env.OVERLAY_DIR }}
+      run: |
+        kustomize edit set image thuyein97/bankapp=$REGISTRY/$NAMESPACE/$IMAGE:$TAG
+        kustomize build . > /tmp/rendered-manifests-staging.yaml
+
+    - name: Preview Kubernetes changes (staging)
+      run: |
+        kubectl diff -f /tmp/rendered-manifests-staging.yaml || true
+
+    - name: Apply manifests to staging
+      run: |
+        set -e
+        kubectl apply -f /tmp/rendered-manifests-staging.yaml
+
+    - name: Wait for rollout (staging)
+      run: |
+        set -e
+        kubectl rollout status deployment/$ACK_DEPLOYMENT_NAME
+
+  deploy_to_kubernetes_prod:
+    runs-on: ubuntu-latest
+    needs: deploy_to_kubernetes_staging
     environment:
       name: production
     env:
@@ -221,7 +266,7 @@ jobs:
     steps:
     - name: Checkout Code
       uses: actions/checkout@v4
-    - name: Set K8s context
+    - name: Set K8s context (prod)
       uses: aliyun/ack-set-context@v1
       with:
         access-key-id: "${{ secrets.ACCESS_KEY_ID }}"
@@ -230,7 +275,7 @@ jobs:
 
     - name: Setup Kustomize
       uses: imranismail/setup-kustomize@v2
-    - name: Render manifests with updated image
+    - name: Render manifests with updated image (prod)
       working-directory: ${{ env.OVERLAY_DIR }}
       run: |
         kustomize edit set image thuyein97/bankapp=$REGISTRY/$NAMESPACE/$IMAGE:$TAG
