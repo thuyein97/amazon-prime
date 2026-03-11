@@ -1,0 +1,8 @@
+resources:
+  - ../../base
+
+images:
+  - name: bankapp-image
+    newName: thuyein97/bankapp
+    newTag: latest
+

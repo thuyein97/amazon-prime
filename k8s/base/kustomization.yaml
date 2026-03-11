@@ -1,0 +1,9 @@
+resources:
+  - deployment.yaml
+  - service.yaml
+  - ingress.yaml
+
+images:
+  - name: thuyein97/bankapp
+    newName: thuyein97/bankapp
+    newTag: latest

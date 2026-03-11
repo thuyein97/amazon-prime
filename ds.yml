@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
       - name: bankapp
-        image: bankapp
+        image: thuyein97/bankapp:latest
         ports:
         - containerPort: 8080
         env:
@@ -39,3 +39,24 @@ spec:
     targetPort: 8080
   selector:
     app: bankapp
+
+---
+# Ingress for external access
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: bankapp-ingress
+  annotations:
+    kubernetes.io/ingressClassName: nginx
+spec:
+  rules:
+    - host: test.alphareds.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: bankapp-service
+                port:
+                  number: 80
