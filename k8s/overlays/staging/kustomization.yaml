@@ -14,3 +14,10 @@ patches:
       - op: replace
         path: /spec/rules/0/host
         value: test2.alphareds.com
+  - target:
+      kind: Deployment
+      name: bankapp
+    patch: |-
+      - op: replace
+        path: /metadata/name
+        value: stgbankapp
