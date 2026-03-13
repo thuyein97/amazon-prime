@@ -1,3 +1,5 @@
+# Secrets (do not commit)
+k8s/base/secret.env
 HELP.md
 target/
 !.mvn/wrapper/maven-wrapper.jar

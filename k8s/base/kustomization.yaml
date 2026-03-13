@@ -2,8 +2,12 @@ resources:
   - deployment.yaml
   - service.yaml
   - ingress.yaml
+  - configmap.yaml
+  - pdb.yaml
 
-images:
-  - name: thuyein97/bankapp
-    newName: thuyein97/bankapp
-    newTag: latest
+secretGenerator:
+  - name: bankapp-secrets
+    envs:
+      - secret.env
+generatorOptions:
+  disableNameSuffixHash: true
