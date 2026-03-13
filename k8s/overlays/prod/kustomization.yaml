@@ -13,8 +13,21 @@ patches:
       name: bankapp-ingress
     patch: |-
       - op: replace
+        path: /metadata/name
+        value: prdbankapp-ingress
+      - op: replace
         path: /spec/rules/0/host
         value: test.alphareds.com
+      - op: replace
+        path: /spec/rules/0/http/paths/0/backend/service/name
+        value: prdbankapp-service
+  - target:
+      kind: Service
+      name: bankapp-service
+    patch: |-
+      - op: replace
+        path: /metadata/name
+        value: prdbankapp-service
   - target:
       kind: Deployment
       name: bankapp
