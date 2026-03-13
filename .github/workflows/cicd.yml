@@ -265,7 +265,43 @@ jobs:
         set -e
         # Basic health check; update URL to your actual ingress/health endpoint if different
         curl -f https://test2.alphareds.com/login || curl -f https://test2.alphareds.com/health
-  
+
+  approve_rollback_staging:
+    runs-on: ubuntu-latest
+    needs: deploy_to_kubernetes_staging
+    if: failure()
+    # Protect this environment with required reviewers in GitHub settings
+    environment:
+      name: staging-rollback
+    env:
+      ACK_DEPLOYMENT_NAME: ${{ vars.staging_deploymentname }}
+      ACK_CLUSTER_ID: ${{ vars.ACK_CLUSTER_ID }}
+    steps:
+    - name: Await manual approval for staging rollback
+      run: |
+        echo "Staging deployment or smoke tests failed."
+        echo "Approve this job in the GitHub Actions UI to trigger a rollback in the next job."
+
+  rollback_staging:
+    runs-on: ubuntu-latest
+    needs: approve_rollback_staging
+    if: always()
+    env:
+      ACK_DEPLOYMENT_NAME: ${{ vars.staging_deploymentname }}
+      ACK_CLUSTER_ID: ${{ vars.ACK_CLUSTER_ID }}
+    steps:
+    - name: Set K8s context (staging)
+      uses: aliyun/ack-set-context@v1
+      with:
+        access-key-id: "${{ secrets.ACCESS_KEY_ID }}"
+        access-key-secret: "${{ secrets.ACCESS_KEY_SECRET }}"
+        cluster-id: "${{ env.ACK_CLUSTER_ID }}"
+
+    - name: Roll back staging deployment
+      run: |
+        set -e
+        echo "Rolling back deployment $ACK_DEPLOYMENT_NAME in staging..."
+        kubectl rollout undo deployment/$ACK_DEPLOYMENT_NAME
 
   deploy_to_kubernetes_prod:
     runs-on: ubuntu-latest
