@@ -1,0 +1,430 @@
+name: CICD Pipeline 
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+permissions:
+  id-token: write
+  contents: write   # required to push updated image tag to staging kustomization
+  packages: write
+  security-events: write
+concurrency:
+  group: production-deploy
+  cancel-in-progress: true
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        cache: maven
+    - name: Build with Maven
+      run: mvn compile
+      
+  security-check:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - name: Run Trivy scanner
+      uses: aquasecurity/trivy-action@0.20.0
+      with:
+        scan-type: fs
+        severity: CRITICAL,HIGH
+        exit-code: 0
+        format: sarif
+        scan-ref: '.'
+        output: 'trivy-fs-results.sarif'
+
+    - name: Upload results to GitHub Security
+      uses: github/codeql-action/upload-sarif@v4
+      if: always() # Ensures results upload even if vulnerabilities are found
+      with:
+        sarif_file: 'trivy-fs-results.sarif'
+        category: trivy-fs
+
+    - name: Run Gitleaks
+      uses: gitleaks/gitleaks-action@v2
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        format: sarif
+        report-path: gitleaks.sarif
+        exit-code: 1 # Fails the build if a secret is found
+
+    - name: Upload Gitleaks results
+      uses: github/codeql-action/upload-sarif@v4 # Use v4 to avoid the deprecation warning
+      if: always() && hashFiles('gitleaks.sarif') != ''
+      with:
+        sarif_file: gitleaks.sarif
+        category: gitleaks
+
+  test:
+    runs-on: ubuntu-latest
+    needs: security-check
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        cache: maven
+    - name: Unit Test Cases
+      run: mvn test
+
+  build_project_and_sonar_scan:
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+    - uses: actions/checkout@v4
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+        cache: maven
+    - name: Build Project
+      run: mvn package
+    - name: Upload JAR artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: app-jar
+        path: target/*.jar 
+        
+    # - uses: actions/checkout@v4
+    #   with:
+    #     # Disabling shallow clones is recommended for improving the relevancy of reporting
+    #     fetch-depth: 0
+    # - name: SonarQube Scan
+    #   uses: SonarSource/sonarqube-scan-action@v5.0.0 # Ex: v4.1.0, See the latest version at https://github.com/marketplace/actions/official-sonarqube-scan
+    #   env:
+    #     SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+    #     SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
+        
+    # - name: SonarQube Quality Gate check
+    #   id: sonarqube-quality-gate-check
+    #   uses: sonarsource/sonarqube-quality-gate-action@master
+    #   with:
+    #     pollingTimeoutSec: 600
+    #   env:
+    #       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+    #       SONAR_HOST_URL: ${{ vars.SONAR_HOST_URL }}
+
+  buils_docker_image_and_push:
+    runs-on: ubuntu-latest
+    needs: build_project_and_sonar_scan
+    steps:
+    - uses: actions/checkout@v4
+    - name: Download JAR artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: app-jar
+        path: app  # this will download JAR to ./app folder
+        
+    - name: Login to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ vars.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v3
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    - name: Build Docker image (Local Only)
+      uses: docker/build-push-action@v6
+      with:
+        context: .
+        push: false # Do not push yet!
+        load: true   # This loads the image into the local Docker daemon for Trivy to see
+        tags: local-image:test
+        file: ./Dockerfile
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+    - name: Scan Local Docker Image
+      uses: aquasecurity/trivy-action@0.20.0
+      with:
+        image-ref: local-image:test
+        severity: CRITICAL,HIGH
+        format: 'sarif'
+        output: 'trivy-image-results.sarif'
+        exit-code: 0 # This will stop the pipeline if vulnerabilities are found
+
+    - name: Upload Scan Results
+      uses: github/codeql-action/upload-sarif@v4
+      if: always() && hashFiles('trivy-image-results.sarif') != ''
+      with:
+        sarif_file: 'trivy-image-results.sarif'
+        category: trivy-image
+
+    - name: Push Docker image (Only if scan passed)
+      uses: docker/build-push-action@v6
+      # This step only runs if the previous steps (including the scan) succeeded
+      with:
+        context: .
+        push: true
+        tags: |
+          ${{ vars.namespace }}/${{ vars.image }}:${{ github.sha }}
+          ${{ vars.namespace }}/${{ vars.image }}:latest
+        file: ./Dockerfile
+
+    
+
+  # deploy_to_kubernetes:
+  #   runs-on: ubuntu-latest
+  #   needs: buils_docker_image_and_push
+  #   steps:
+  #   - name: Checkout Code
+  #     uses: actions/checkout@v4
+  #   - name: Install AWS CLI
+  #     run: |
+  #       curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+  #       unzip awscliv2.zip
+  #       sudo ./aws/install
+  #   - name: Configure AWS credentials
+  #     uses: aws-actions/configure-aws-credentials@v2
+  #     with:
+  #       aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+  #       aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+  #       aws-region: ap-south-1
+  #   - name: Set up kubectl
+  #     uses: azure/setup-kubectl@v3
+  #     with:
+  #       version: latest
+  #   - name: Configure kubeconfig
+  #     run: |
+  #       mkdir -p $HOME/.kube
+  #       echo "${{ secrets.EKS_KUBECONFIG }}" > $HOME/.kube/config
+  #   - name: Deploy to EKS
+  #     run: |
+  #       kubectl apply -f ds.yml
+  deploy_to_kubernetes_staging:
+    runs-on: ubuntu-latest
+    needs: buils_docker_image_and_push
+    environment:
+      name: staging
+    env:
+      REGISTRY: ${{ vars.registry }}
+      NAMESPACE: ${{ vars.namespace }}
+      IMAGE: ${{ vars.image }}
+      TAG: ${{ github.sha }}
+      ACK_DEPLOYMENT_NAME: ${{ vars.staging_deploymentname }}
+      OVERLAY_DIR: k8s/overlays/staging
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Create Kustomize secret env file (staging)
+      run: |
+        set -e
+        mkdir -p k8s/base
+        cat > k8s/base/secret.env <<'EOF'
+        SPRING_DATASOURCE_USERNAME=${{ secrets.SPRING_DATASOURCE_USERNAME }}
+        SPRING_DATASOURCE_PASSWORD=${{ secrets.SPRING_DATASOURCE_PASSWORD }}
+        EOF
+
+    - name: Debug GitHub OIDC token claims (safe)
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        token="$(curl -sS -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.aliyuncs.com" | jq -r '.value')"
+
+        echo "::add-mask::$token"
+
+        TOKEN="$token" python3 -c 'import os,base64,json; t=os.environ["TOKEN"]; p=t.split(".")[1]; p+="="*(-len(p)%4); d=json.loads(base64.urlsafe_b64decode(p.encode()).decode()); keys=["iss","aud","sub","ref","repository","job_workflow_ref","environment","actor","sha","workflow","run_id"]; print(json.dumps({k:d.get(k) for k in keys}, indent=2, sort_keys=True))'
+
+    # - name: Configure Alibaba Cloud credentials (OIDC)
+    #   uses: aliyun/configure-aliyun-credentials-action@v1
+    #   with:
+    #     role-to-assume: ${{ secrets.ROLETOASSUME }}
+    #     oidc-provider-arn: ${{ secrets.OIDC_PROVIDER }}
+    #     audience: ${{ secrets.AUDIENCE }}
+
+    # - name: Set K8s context (staging)
+    #   uses: aliyun/ack-set-context@v1
+    #   with:
+    #     access-key-id: ${{ env.ALIBABA_CLOUD_ACCESS_KEY_ID }}
+    #     access-key-secret: ${{ env.ALIBABA_CLOUD_ACCESS_KEY_SECRET }}
+    #     security-token: ${{ env.ALIBABA_CLOUD_SECURITY_TOKEN }}
+    #     cluster-id: c6158028f3dfc4d6c8e00daf7a9c4f3e6
+
+    - name: Setup Kustomize
+      uses: imranismail/setup-kustomize@v2
+    - name: Render manifests with updated image (staging)
+      working-directory: ${{ env.OVERLAY_DIR }}
+      run: |
+        kustomize edit set image thuyein97/bankapp=$REGISTRY/$NAMESPACE/$IMAGE:$TAG
+        kustomize build . > /tmp/rendered-manifests-staging.yaml
+
+  #   - name: Preview Kubernetes changes (staging)
+  #     run: |
+  #       kubectl diff -f /tmp/rendered-manifests-staging.yaml || true
+
+  #   - name: Apply manifests to staging
+  #     run: |
+  #       set -e
+  #       kubectl apply -f /tmp/rendered-manifests-staging.yaml
+
+  #   - name: Wait for rollout (staging)
+  #     run: |
+  #       set -e
+  #       kubectl rollout status deployment/$ACK_DEPLOYMENT_NAME
+    
+  #   - name: Post-deploy smoke test
+  #     run: |
+  #       set -e
+  #       BASE="https://test2.alphareds.com"
+  #       deadline=$((SECONDS + 120))
+  #       while (( SECONDS < deadline )); do
+  #         if curl -fsS --max-time 30 "$BASE/login" || curl -fsS --max-time 30 "$BASE/health"; then
+  #           echo "Smoke test passed."
+  #           exit 0
+  #         fi
+  #         echo "Health check failed, retrying in 12s... ($((deadline - SECONDS))s left)"
+  #         sleep 12
+  #       done
+  #       echo "Smoke test timed out after 2 minutes"
+  #       exit 1
+
+  # approve_rollback_staging:
+  #   runs-on: ubuntu-latest
+  #   needs: deploy_to_kubernetes_staging
+  #   if: failure()
+  #   # Protect this environment with required reviewers in GitHub settings
+  #   environment:
+  #     name: staging-rollback
+  #   env:
+  #     ACK_DEPLOYMENT_NAME: ${{ vars.staging_deploymentname }}
+  #     ACK_CLUSTER_ID: ${{ vars.ACK_CLUSTER_ID }}
+  #   steps:
+  #   - name: Await manual approval for staging rollback
+  #     run: |
+  #       echo "Staging deployment or smoke tests failed."
+  #       echo "Approve this job in the GitHub Actions UI to trigger a rollback in the next job."
+
+  # rollback_staging:
+  #   runs-on: ubuntu-latest
+  #   needs: approve_rollback_staging
+  #   if: success()
+  #   env:
+  #     ACK_DEPLOYMENT_NAME: ${{ vars.staging_deploymentname }}
+  #     ACK_CLUSTER_ID: ${{ vars.ACK_CLUSTER_ID }}
+  #   steps:
+  #   - name: Configure Alibaba Cloud credentials (OIDC)
+  #     uses: aliyun/configure-aliyun-credentials-action@v1
+  #     with:
+  #       role-to-assume: ${{ secrets.ROLETOASSUME }}
+  #       oidc-provider-arn: ${{ secrets.OIDC_PROVIDER }}
+  #       audience: ${{ secrets.AUDIENCE }}
+
+  #   - name: Set K8s context (staging)
+  #     uses: aliyun/ack-set-context@v1
+  #     with:
+  #       access-key-id: ${{ env.ALIBABA_CLOUD_ACCESS_KEY_ID }}
+  #       access-key-secret: ${{ env.ALIBABA_CLOUD_ACCESS_KEY_SECRET }}
+  #       security-token: ${{ env.ALIBABA_CLOUD_SECURITY_TOKEN }}
+  #       cluster-id: c6158028f3dfc4d6c8e00daf7a9c4f3e6
+
+  #   - name: Roll back staging deployment
+  #     run: |
+  #       set -e
+  #       echo "Rolling back deployment $ACK_DEPLOYMENT_NAME in staging..."
+  #       kubectl rollout undo deployment/$ACK_DEPLOYMENT_NAME
+
+  deploy_to_kubernetes_prod:
+    runs-on: ubuntu-latest
+    needs: deploy_to_kubernetes_staging
+    environment:
+      name: production
+    env:
+      REGISTRY: ${{ vars.registry }}
+      NAMESPACE: ${{ vars.namespace }}
+      IMAGE: ${{ vars.image }}
+      TAG: ${{ github.sha }}
+      ACK_DEPLOYMENT_NAME: ${{ vars.deploymentname }}
+      OVERLAY_DIR: k8s/overlays/prod
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Create Kustomize secret env file (prod)
+      run: |
+        set -e
+        mkdir -p k8s/base
+        cat > k8s/base/secret.env <<'EOF'
+        SPRING_DATASOURCE_USERNAME=${{ secrets.SPRING_DATASOURCE_USERNAME }}
+        SPRING_DATASOURCE_PASSWORD=${{ secrets.SPRING_DATASOURCE_PASSWORD }}
+        EOF
+
+    # - name: Configure Alibaba Cloud credentials (OIDC)
+    #   uses: aliyun/configure-aliyun-credentials-action@v1
+    #   with:
+    #    role-to-assume: ${{ secrets.ROLETOASSUME }}
+    #    oidc-provider-arn: ${{ secrets.OIDC_PROVIDER }}
+    #    audience: ${{ secrets.AUDIENCE }}
+
+    # - name: Set K8s context (prod)
+    #   uses: aliyun/ack-set-context@v1
+    #   with:
+    #     access-key-id: ${{ env.ALIBABA_CLOUD_ACCESS_KEY_ID }}
+    #     access-key-secret: ${{ env.ALIBABA_CLOUD_ACCESS_KEY_SECRET }}
+    #     security-token: ${{ env.ALIBABA_CLOUD_SECURITY_TOKEN }}
+    #     cluster-id: c6158028f3dfc4d6c8e00daf7a9c4f3e6
+
+    - name: Setup Kustomize
+      uses: imranismail/setup-kustomize@v2
+    - name: Render manifests with updated image (prod)
+      working-directory: ${{ env.OVERLAY_DIR }}
+      run: |
+        kustomize edit set image thuyein97/bankapp=$REGISTRY/$NAMESPACE/$IMAGE:$TAG
+        kustomize build . > /tmp/rendered-manifests.yaml
+
+    # - name: Preview Kubernetes changes
+    #   run: |
+    #     kubectl diff -f /tmp/rendered-manifests.yaml || true
+
+    # - name: Apply manifests
+    #   run: |
+    #     set -e
+    #     kubectl apply -f /tmp/rendered-manifests.yaml
+
+    # - name: Wait for rollout
+    #   run: |
+    #     set -e
+    #     kubectl rollout status deployment/$ACK_DEPLOYMENT_NAME
+
+    # - name: Post-deploy smoke test
+    #   run: |
+    #     set -e
+    #     BASE="https://test.alphareds.com"
+    #     deadline=$((SECONDS + 120))
+    #     while (( SECONDS < deadline )); do
+    #       if curl -fsS --max-time 30 "$BASE/login" || curl -fsS --max-time 30 "$BASE/health"; then
+    #         echo "Smoke test passed."
+    #         exit 0
+    #       fi
+    #       echo "Health check failed, retrying in 12s... ($((deadline - SECONDS))s left)"
+    #       sleep 12
+    #     done
+    #     echo "Smoke test timed out after 2 minutes"
+    #     exit 1
+
+    # - name: Rollback on failure
+    #   if: failure()
+    #   run: |
+    #     echo "Deployment failed, attempting rollback..."
+    #     kubectl rollout undo deployment/$ACK_DEPLOYMENT_NAME || true
+    #     exit 1
+
+  
