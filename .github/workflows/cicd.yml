@@ -219,7 +219,7 @@ jobs:
       REGISTRY: ${{ vars.registry }}
       NAMESPACE: ${{ vars.namespace }}
       IMAGE: ${{ vars.image }}
-      TAG: ${{ github.sha }}
+      TAG: ${{ needs.buils_docker_image_and_push.outputs.image_tag }}
       ACK_DEPLOYMENT_NAME: ${{ vars.staging_deploymentname }}
       OVERLAY_DIR: k8s/overlays/staging
 
