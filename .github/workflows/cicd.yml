@@ -120,6 +120,8 @@ jobs:
 
   buils_docker_image_and_push:
     runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ steps.vars.outputs.sha_short }}
     needs: build_project_and_sonar_scan
     steps:
     - uses: actions/checkout@v4
@@ -164,7 +166,9 @@ jobs:
       with:
         sarif_file: 'trivy-image-results.sarif'
         category: trivy-image
-
+    - name: Set short git SHA
+      id: vars
+      run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
     - name: Push Docker image (Only if scan passed)
       uses: docker/build-push-action@v6
       # This step only runs if the previous steps (including the scan) succeeded
@@ -172,7 +176,7 @@ jobs:
         context: .
         push: true
         tags: |
-          ${{ vars.namespace }}/${{ vars.image }}:${{ github.sha }}
+          ${{ vars.namespace }}/${{ vars.image }}:${{ steps.vars.outputs.sha_short }}
           ${{ vars.namespace }}/${{ vars.image }}:latest
         file: ./Dockerfile
 
@@ -232,16 +236,16 @@ jobs:
         SPRING_DATASOURCE_PASSWORD=${{ secrets.SPRING_DATASOURCE_PASSWORD }}
         EOF
 
-    - name: Debug GitHub OIDC token claims (safe)
-      shell: bash
-      run: |
-        set -euo pipefail
+    # - name: Debug GitHub OIDC token claims (safe)
+    #   shell: bash
+    #   run: |
+    #     set -euo pipefail
 
-        token="$(curl -sS -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.aliyuncs.com" | jq -r '.value')"
+    #     token="$(curl -sS -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=sts.aliyuncs.com" | jq -r '.value')"
 
-        echo "::add-mask::$token"
+    #     echo "::add-mask::$token"
 
-        TOKEN="$token" python3 -c 'import os,base64,json; t=os.environ["TOKEN"]; p=t.split(".")[1]; p+="="*(-len(p)%4); d=json.loads(base64.urlsafe_b64decode(p.encode()).decode()); keys=["iss","aud","sub","ref","repository","job_workflow_ref","environment","actor","sha","workflow","run_id"]; print(json.dumps({k:d.get(k) for k in keys}, indent=2, sort_keys=True))'
+    #     TOKEN="$token" python3 -c 'import os,base64,json; t=os.environ["TOKEN"]; p=t.split(".")[1]; p+="="*(-len(p)%4); d=json.loads(base64.urlsafe_b64decode(p.encode()).decode()); keys=["iss","aud","sub","ref","repository","job_workflow_ref","environment","actor","sha","workflow","run_id"]; print(json.dumps({k:d.get(k) for k in keys}, indent=2, sort_keys=True))'
 
     # - name: Configure Alibaba Cloud credentials (OIDC)
     #   uses: aliyun/configure-aliyun-credentials-action@v1
@@ -264,7 +268,13 @@ jobs:
       working-directory: ${{ env.OVERLAY_DIR }}
       run: |
         kustomize edit set image thuyein97/bankapp=$REGISTRY/$NAMESPACE/$IMAGE:$TAG
-        kustomize build . > /tmp/rendered-manifests-staging.yaml
+    - name: Commit and Push
+      run: |
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+        git add .
+        git commit -m "chore: update image to ${{ needs.buils_docker_image_and_push.outputs.image_tag }} [skip ci]"
+        git push
 
   #   - name: Preview Kubernetes changes (staging)
   #     run: |
