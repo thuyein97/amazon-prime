@@ -225,21 +225,21 @@ jobs:
     - name: Checkout ArgoCD GitOps repo
       uses: actions/checkout@v4
       with:
-        repository: ${{ vars.GITOPS_REPO || 'thuyein97/amazon-argocd' }}
+        repository: ${{ vars.ARGOCD_REPO || 'thuyein97/amazon-argocd' }}
         token: ${{ secrets.GITOPS_PAT }}
-        path: gitops
+        path: amazon-argocd
 
     - name: Setup Kustomize
       uses: imranismail/setup-kustomize@v2
 
     - name: Bump staging image tag in ArgoCD GitOps
-      working-directory: gitops/apps/bankapp-staging
+      working-directory: amazon-argocd/apps/bankapp-staging
       run: |
         set -euo pipefail
         kustomize edit set image "docker.io/${NAMESPACE}/${IMAGE}:${TAG}"
 
     - name: Commit and push ArgoCD GitOps (staging)
-      working-directory: gitops
+      working-directory: amazon-argocd
       run: |
         set -euo pipefail
         git config user.name "github-actions[bot]"
@@ -342,21 +342,21 @@ jobs:
     - name: Checkout ArgoCD GitOps repo
       uses: actions/checkout@v4
       with:
-        repository: ${{ vars.GITOPS_REPO || 'thuyein97/amazon-argocd' }}
+        repository: ${{ vars.ARGOCD_REPO || 'thuyein97/amazon-argocd' }}
         token: ${{ secrets.GITOPS_PAT }}
-        path: gitops
+        path: amazon-argocd
 
     - name: Setup Kustomize
       uses: imranismail/setup-kustomize@v2
 
     - name: Bump production image tag in ArgoCD GitOps
-      working-directory: gitops/apps/bankapp-prod
+      working-directory: amazon-argocd/apps/bankapp-prod
       run: |
         set -euo pipefail
         kustomize edit set image "${NAMESPACE}/${IMAGE}=docker.io/${NAMESPACE}/${IMAGE}:${TAG}"
 
     - name: Commit and push ArgoCD GitOps (production)
-      working-directory: gitops
+      working-directory: amazon-argocd
       run: |
         set -euo pipefail
         git config user.name "github-actions[bot]"
